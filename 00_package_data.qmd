@@ -1,0 +1,299 @@
+---
+title: "00_packages_data"
+format: html
+editor: visual
+self-contained: true
+toc: true
+execute: 
+  warning: false
+---
+
+# Analysis of the MS224: PM~2.5~ distribution along Socioeconomic status in Latin American cities
+
+This code describes the analysis and data manipulation of the MS224
+
+## Loading Packages and Data
+
+```{r}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, ggthemes, RColorBrewer,
+               sf, geofacet, ggthemes,
+               readr, ggpubr, sjPlot,
+               mapview, gtsummary, tibble,
+               gtsummary, cowplot, ggsci,
+               lme4, performance, formattable, 
+               scales, parameters, sjPlot, lubridate, 
+               gnm, mgcv, splines, 
+               dlnm, mvmeta, mixmeta)
+```
+
+Loading data of variables
+
+```{r}
+AR_L2_5 <- read_csv("data/raw/variables/AR_L2_5_ANALYTIC_05312023.csv")
+BR_L2_5 <- read_csv("data/raw/variables/BR_L2_5_ANALYTIC_05312023.csv")
+CL_L3 <- read_csv("data/raw/variables/CL_L3_ANALYTIC_05312023.csv")
+CO_L3 <- read_csv("data/raw/variables/CO_L3_ANALYTIC_05312023.csv")
+CR_L2_5 <- read_csv("data/raw/variables/CR_L2_5_ANALYTIC_05312023.csv")
+GT_L3 <- read_csv("data/raw/variables/GT_L3_ANALYTIC_RES_05312023.csv")
+MX_L3 <- read_csv("data/raw/variables/MX_L3_ANALYTIC_05312023.csv")
+PA_L3 <- read_csv("data/raw/variables/PA_L3_ANALYTIC_05312023.csv")
+PE_L3 <- read_csv("data/raw/variables/PE_L3_ANALYTIC_05312023.csv")
+```
+
+Loading geometries
+
+```{r}
+AR_SALID2_5_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L2_5_20230411.gdb", layer = "AR_SEC_ENE_SALID2_5_4_14_23") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+
+BR_SALID2_5_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L2_5_20230411.gdb", layer = "BRAP_SALURBAL_2_28_23") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+
+CL_SALID3_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L3_20230410.gdb", layer = "CL_SALID3_Pop_5_4_21") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+
+CO_SALID3_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L3_20230410.gdb", layer = "CO_SALID3_Pop_3_1_23") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+
+CR_SALID2_5_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L2_5_20230411.gdb", layer = "CR_SALID2_5_3_7_23") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+
+GT_SALID3_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L3_20230410.gdb", layer = "GT_SALID3_Pop_4_11_23") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+
+MX_SALID3_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L3_20230410.gdb", layer = "MX_SALID3_Pop_2_23_23") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+
+PA_SALID3_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L3_20230410.gdb", layer = "PA_SALID3_Pop_3_2_23") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+
+PE_SALID3_geom <- st_read(dsn = "data/raw/geom/SALURBAL_L3_20230410.gdb", layer = "PE_SALID3_Pop_5_12_23") %>% 
+  st_as_sf(wkt = "Shape", crs = 4326) 
+```
+
+Merging databases and selecting variables of interest
+
+```{r}
+AR_data <- merge(
+  x= AR_SALID2_5_geom,
+  y= AR_L2_5,
+  by.x = c("SALID1", "SALID2", "SALID2_5", "EXCLD_BE_MSRS"),
+  by.y = c("SALID1", "SALID2", "SALID3", "EXCLD_BE_MSRS")
+) %>% 
+  select(!c(CNSPOP10)) %>% 
+  rename(c("SALID3"="SALID2_5"))
+
+BR_data <- merge(
+  x= BR_SALID2_5_geom,
+  y= BR_L2_5,
+  by.x = c("SALID1", "SALID2", "SALID2_5"),
+  by.y = c("SALID1", "SALID2", "SALID3")
+) %>% 
+  select(!c(CNSPOP10)) %>% 
+  rename(c("SALID3"="SALID2_5"))
+
+CL_data <- merge(
+  x= CL_SALID3_geom,
+  y= CL_L3,
+  by.x = c("SALID1", "SALID2", "salid3", "FLAG16_17"),
+  by.y = c("SALID1", "SALID2", "SALID3", "FLAG16_17")
+) %>% 
+  select(!c(CNSPOP17)) %>% 
+  rename(c("SALID3"="salid3"))
+
+CO_data <- merge(
+  x= CO_SALID3_geom,
+  y= CO_L3,
+  by.x = c("SALID1", "SALID2", "SALID3"),
+  by.y = c("SALID1", "SALID2", "SALID3")
+) %>% 
+  select(!c(CNSPOP05))
+
+CR_data <- merge(
+  x= CR_SALID2_5_geom,
+  y= CR_L2_5,
+  by.x = c("SALID1", "SALID2", "SALID2_5", "FLAG11_14"),
+  by.y = c("SALID1", "SALID2", "SALID3", "FLAG11_14")
+) %>% 
+  select(!c(CNSPOP11)) %>% 
+  mutate(
+    CODDIST = as.character(CODDIST)
+  ) %>% 
+  rename(c("SALID3"="SALID2_5"))
+
+GT_data <- merge(
+  x= GT_SALID3_geom,
+  y= GT_L3,
+  by.x = c("SALID1", "SALID2", "SALID3"),
+  by.y = c("SALID1", "SALID2", "SALID3")
+) %>% 
+  select(!c(CNSPOP02)) %>% 
+  mutate(
+    ADM1ID = as.character(ADM1ID)
+  )
+
+MX_data <- merge(
+  x= MX_SALID3_geom,
+  y= MX_L3,
+  by.x = c("SALID1", "SALID2", "salid3"),
+  by.y = c("SALID1", "SALID2", "SALID3")
+) %>% 
+  select(!c(CNSPOP10)) %>% 
+  rename(c("SALID3"="salid3"))
+
+PA_data <- merge(
+  x= PA_SALID3_geom,
+  y= PA_L3,
+  by.x = c("SALID1", "SALID2", "salid3"),
+  by.y = c("SALID1", "SALID2", "SALID3")
+) %>% 
+  select(!c(CNSPOP10)) %>% 
+  rename(c("SALID3"="salid3"))
+
+PE_data <- merge(
+  x= PE_SALID3_geom,
+  y= PE_L3,
+  by.x = c("SALID1", "SALID2", "SALID3", "SALID2_07"),
+  by.y = c("SALID1", "SALID2", "SALID3", "SALID2_07")
+) %>% 
+  select(!c(CNSPOP17))
+```
+
+Merging all countries
+
+```{r}
+DB_complete <- bind_rows(
+  AR_data,
+  BR_data,
+  CL_data,
+  CO_data,
+  CR_data,
+  GT_data,
+  MX_data,
+  PA_data,
+  PE_data
+) %>% 
+  mutate(
+    country = case_when(
+      ISO2 == "AR" ~ "Argentina",
+      ISO2 == "BR" ~ "Brazil",
+      ISO2 %in% c("CR", "GT", "PA") ~ "Central America*",
+      ISO2 == "CL" ~ "Chile",
+      ISO2 == "CO" ~ "Colombia",
+      ISO2 == "MX" ~ "Mexico",
+      ISO2 == "PE" ~ "Peru"
+    )
+  ) %>% 
+  mutate(
+    BECPOPDENSL3_thousand = BECPOPDENSL3/1000,
+    new_dens_thousand = (CNSPOPL3/(Shape_Area/1000000))/1000
+  ) %>% 
+  mutate(
+    APSPM25MEAN2019L3 = (APSPM25MEAN2017L3+APSPM25MEAN2018L3+APSPM25MEAN2019L3)/3
+  ) %>% 
+  mutate(
+    PM2_5_2019_cat = case_when(
+      APSPM25MEAN2019L3 <= 5 ~ "[0 - 5]",
+      APSPM25MEAN2019L3 <= 10 & APSPM25MEAN2019L3 > 5 ~ "(5 - 10]",
+      APSPM25MEAN2019L3 <= 15 & APSPM25MEAN2019L3 > 10 ~ "(10 - 15]",
+      APSPM25MEAN2019L3 <= 25 & APSPM25MEAN2019L3 > 15 ~ "(15 - 25]",
+      APSPM25MEAN2019L3 <= 35 & APSPM25MEAN2019L3 > 25 ~ "(25 - 35]",
+      APSPM25MEAN2019L3 > 35 ~ "> 35"
+    ),
+    PM2_5_2019_levels = factor(
+      x = PM2_5_2019_cat,
+      levels = c("> 35", "(25 - 35]", "(15 - 25]", "(10 - 15]", "(5 - 10]", "[0 - 5]")
+    ),
+    PM_census_1 = case_when(
+      ISO2 == "AR" ~ APSPM25MEAN2009L3,
+      ISO2 == "BR" ~ APSPM25MEAN2009L3,
+      ISO2 == "CL" ~ APSPM25MEAN2016L3,
+      ISO2 == "CO" ~ APSPM25MEAN2017L3,
+      ISO2 == "CR" ~ APSPM25MEAN2010L3,
+      ISO2 == "GT" ~ APSPM25MEAN2001L3,
+      ISO2 == "MX" ~ APSPM25MEAN2009L3,
+      ISO2 == "PA" ~ APSPM25MEAN2009L3,
+      ISO2 == "PE" ~ APSPM25MEAN2016L3
+    ),
+    PM_census_2 = case_when(
+      ISO2 == "AR" ~ APSPM25MEAN2010L3,
+      ISO2 == "BR" ~ APSPM25MEAN2010L3,
+      ISO2 == "CL" ~ APSPM25MEAN2017L3,
+      ISO2 == "CO" ~ APSPM25MEAN2018L3,
+      ISO2 == "CR" ~ APSPM25MEAN2011L3,
+      ISO2 == "GT" ~ APSPM25MEAN2002L3,
+      ISO2 == "MX" ~ APSPM25MEAN2010L3,
+      ISO2 == "PA" ~ APSPM25MEAN2010L3,
+      ISO2 == "PE" ~ APSPM25MEAN2017L3
+    ),
+    PM_census_3 = case_when(
+      ISO2 == "AR" ~ APSPM25MEAN2011L3,
+      ISO2 == "BR" ~ APSPM25MEAN2011L3,
+      ISO2 == "CL" ~ APSPM25MEAN2018L3,
+      ISO2 == "CO" ~ APSPM25MEAN2019L3,
+      ISO2 == "CR" ~ APSPM25MEAN2012L3,
+      ISO2 == "GT" ~ APSPM25MEAN2003L3,
+      ISO2 == "MX" ~ APSPM25MEAN2011L3,
+      ISO2 == "PA" ~ APSPM25MEAN2011L3,
+      ISO2 == "PE" ~ APSPM25MEAN2018L3
+    ),
+    PM_census = (PM_census_1 + PM_census_2 + PM_census_3)/3
+  )
+
+DB_complete$SALID1 <- as.character(DB_complete$SALID1)
+DB_complete$BECCZL1AD <- as.character(DB_complete$BECCZL1AD)
+```
+
+Mapping
+
+```{r}
+#select goemetries of all LatinAmerican countries
+
+latam <- st_read("data/raw/geom/latam/world-administrative-boundaries.shp") %>% 
+  st_as_sf(crs = 4326) %>% 
+  filter(!name %in% c("United States of America", "Canada", "Greenland", "Midway Is.", "Jarvis Island"))
+```
+
+Adding City-level variables
+
+```{r}
+DB_complete <- merge(
+  DB_complete,
+  read.csv("data/raw/Data Request MS242_03082023/SECGDPGPC_L1AD_20200124.csv") %>% 
+  filter(YEAR == 2015) %>% 
+  select(SALID1, SECGDPGPPC), 
+  by.x = "SALID1",
+  by.y = "SALID1",
+  all.x = T
+) %>% 
+  merge(
+    read.csv("data/raw/Data Request MS242_03082023/BEC_L1AD_08162023.csv") %>% 
+      select(SALID1, BECCITYAGEL1AD, BECTPOP2020L1AD), 
+  by.x = "SALID1",
+  by.y = "SALID1",
+  all.x = T
+  ) %>% 
+  mutate(
+    found_year = case_when(
+      BECCITYAGEL1AD >= 1500 & BECCITYAGEL1AD < 1600 ~ "1500 - 1599",
+      BECCITYAGEL1AD >= 1600 & BECCITYAGEL1AD < 1699 ~ "1600 - 1699",
+      BECCITYAGEL1AD >= 1700 & BECCITYAGEL1AD < 1799 ~ "1700 - 1799",
+      BECCITYAGEL1AD >= 1800 & BECCITYAGEL1AD < 1899 ~ "1800 - 1899",
+      BECCITYAGEL1AD >= 1900 & BECCITYAGEL1AD < 2000 ~ "1900 - 1999"
+    )
+  ) %>% 
+  mutate(
+    city_age_num = case_when(
+      ISO2 == "AR" ~ (2010 - BECCITYAGEL1AD),
+      ISO2 == "BR" ~ (2010 - BECCITYAGEL1AD),
+      ISO2 == "CL" ~ (2017 - BECCITYAGEL1AD),
+      ISO2 == "CO" ~ (2018 - BECCITYAGEL1AD),
+      ISO2 == "CR" ~ (2011 - BECCITYAGEL1AD),
+      ISO2 == "GT" ~ (2002 - BECCITYAGEL1AD),
+      ISO2 == "MX" ~ (2010 - BECCITYAGEL1AD),
+      ISO2 == "PA" ~ (2010 - BECCITYAGEL1AD),
+      ISO2 == "PE" ~ (2017 - BECCITYAGEL1AD)
+    )
+  )
+```

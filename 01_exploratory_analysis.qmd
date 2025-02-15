@@ -1,0 +1,1553 @@
+---
+title: "00_exploratory_analysis"
+format: html
+editor: visual
+self-contained: true
+toc: true
+execute: 
+  warning: false
+---
+
+# Analysis of the MS224: PM~2.5~ distribution along Socioeconomic status in Latin American cities
+
+This code describes the analysis and data manipulation of the MS224
+
+## Loading previous scripts
+
+```{r}
+source("00_package_data.R")
+```
+
+## Figure 1
+
+```{r}
+DB_complete_nogeom <- DB_complete %>% 
+  st_drop_geometry() %>% 
+  filter(country != "Peru")
+
+L1_city_points <- st_read(dsn = "data/raw/geom/MS242_L1.gdb/", layer = "SALURBAL_L1_CityCenter_PublicIDs20230922")
+
+L1_city_polygons <- st_read(dsn = "data/raw/geom/MS242_L1.gdb/", layer = "SALURBAL_L1AD_NoSmallIslands_PublicIDs20230922")
+
+sali1_equivalents <- read.csv("data/raw/geom/SALID1_PUBSALID1.csv")
+
+fig1_db_nogeom <- DB_complete_nogeom %>% 
+  group_by(SALID1) %>% 
+  summarise(
+    PM2_5_2019 = sum(APSPM25MEAN2019L3*CNSPOPL3, na.rm = T)/sum(CNSPOPL3, na.rm = T),
+    POPL1 = sum(CNSPOPL3, na.rm = T)
+  ) %>% 
+  merge(
+  y = sali1_equivalents,
+  by = "SALID1"
+  ) %>% 
+  mutate(
+    PM2_5_2019_cat = case_when(
+      PM2_5_2019 <= 5 ~ "[0 - 5]",
+      PM2_5_2019 <= 10 & PM2_5_2019 > 5 ~ "(5 - 10]",
+      PM2_5_2019 <= 15 & PM2_5_2019 > 10 ~ "(10 - 15]",
+      PM2_5_2019 <= 25 & PM2_5_2019 > 15 ~ "(15 - 25]",
+      PM2_5_2019 <= 35 & PM2_5_2019 > 25 ~ "(25 - 35]",
+      PM2_5_2019 > 35 ~ "> 35"
+    ),
+    PM2_5_2019_levels = factor(
+      x = PM2_5_2019_cat,
+      levels = c("> 35", "(25 - 35]", "(15 - 25]", "(10 - 15]", "(5 - 10]", "[0 - 5]")
+    )
+  )
+
+fig1_db <- merge(
+  x = L1_city_points,
+  y = fig1_db_nogeom,
+  by = "PUBSALID1"
+)
+
+ggplot() + 
+  geom_sf(data=latam, fill = "#d1dbe4") + 
+  geom_sf(data = fig1_db, aes(color = PM2_5_2019_levels), size = 2.3, alpha = 0.715) + 
+  scale_color_manual(values = c("#0c8fc7", "#72b043", "#f8cc1b", "#f37324", "#e12729", "#380d61")) +
+  theme_void() +
+  labs(
+    color = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")"))
+  ) +
+  theme(legend.position = c(0.8,0.8),
+        legend.background = element_rect(fill = "white", color = NA))
+
+ggsave("output/figs/fig1.png", plot = last_plot(), width = 7, height = 7, dpi = 700, bg = "white")
+
+pm25_palette <- c( "#004529FF", "#14783EFF", "#4BB062FF", "#A2D889FF", "#E4F4ABFF","#f9db8c" )
+
+fig1_map <- ggplot() + 
+  geom_sf(data=latam, fill = "#d1dbe4") + 
+  geom_sf(data = fig1_db, aes(color = PM2_5_2019_levels), size = 2.4, alpha = 0.8) + 
+  scale_color_manual(values = pm25_palette) +
+  theme_void() +
+  labs(
+    color = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")"))
+  ) +
+  theme(legend.position = c(0.79,0.85),
+        legend.background = element_rect(fill = "white", color = NA))
+
+fig1_map
+
+pop_hdi <- fig1_db %>% 
+  st_drop_geometry() %>% 
+  group_by(PM2_5_2019_levels) %>% 
+  summarise(cities = n()) |> 
+  ungroup() |> 
+  mutate(percent = cities / sum(cities) * 100) |> 
+  na.omit()
+
+pop_hdi <- pop_hdi |> 
+  mutate(
+    y_text = case_when(
+      percent <= 10 ~ percent + 6,
+      .default = percent - 6 
+    ),
+    label = paste0(round(percent, 1), "%")
+  )
+
+x_labels <- c(pop_hdi$PM2_5_2019_levels)
+
+fig1_bar <- ggplot(pop_hdi, aes(forcats::fct_rev(PM2_5_2019_levels), percent, fill = PM2_5_2019_levels)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  geom_text(
+    aes(y = y_text, label = label, color = PM2_5_2019_levels),
+    size = 4
+  ) +
+  coord_flip() +
+  scale_x_discrete(labels = rev(x_labels)) +
+  scale_fill_manual(values = pm25_palette) +
+  scale_color_manual(values = c(rep("black", 5), rep("white", 2), "black")) +
+  guides(fill = "none", color = "none") +
+  labs(
+    title = expression(paste("Cities (%) by ",PM[2.5]," levels")),
+    x = NULL,
+    y = NULL
+  ) +
+  theme_void() +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(size = 12, hjust = -1),
+    axis.text.y = element_text(size = 11),
+    axis.text.x = element_blank()
+  )
+
+fig1 <- fig1_map + patchwork::inset_element(fig1_bar, left = 0.02, bottom = 0.07, right = 0.52, top = 0.52)
+
+ggsave("output/figs/fig1_c_final.png", plot = fig1, width = 7, height = 7, dpi = 700, bg = "white")
+```
+
+## Figure 1 + Facets
+
+Argentina
+
+```{r}
+crs2 <- 6384 # https://epsg.io/6384
+
+center <- c(long = -58.6,
+            lat = -34.65)
+center_proj <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2)
+
+dist <-  100000
+circle <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2) %>% 
+  st_buffer(dist = dist) %>% 
+  st_transform(crs = 4326)
+
+ggplot(circle) +
+  geom_sf()
+
+pm25_palette_argentina <- c("#4BB062FF", "#A2D889FF", "#E4F4ABFF")
+
+argentina_map <- ggplot() +
+  geom_sf(
+    data = circle,
+    fill = "white",
+    color = "black"
+  ) +
+  geom_sf(
+    data = DB_complete %>% 
+  filter(SALID1 == 101112) %>% 
+  st_transform(crs = 4326) %>% 
+  st_intersection(circle),
+    aes(
+      fill = PM2_5_2019_levels
+    )
+  ) +
+  scale_fill_manual(values = pm25_palette_argentina) +
+  scale_color_manual("black") +
+  theme_void() +
+  theme(
+    legend.position = "none"
+  )
+
+argentina_map
+```
+
+Brazil
+
+```{r}
+sf_use_s2(FALSE)
+crs2 <- 6384 # https://epsg.io/6384
+
+center <- c(long = -46.6,
+            lat = -23.6)
+center_proj <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2)
+
+dist <-  97000
+circle <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2) %>% 
+  st_buffer(dist = dist) %>% 
+  st_transform(crs = 4326)
+
+ggplot(circle) +
+  geom_sf()
+
+pm25_palette_brasil <- c("#4BB062FF", "#A2D889FF")
+
+brasil_map <- ggplot() +
+  geom_sf(
+   data = circle,
+    fill = "white",
+    color = "black"
+  ) +
+  geom_sf(
+    data = DB_complete %>% 
+  filter(SALID1 == 102248) %>% 
+  st_transform(crs = 4326) %>% 
+  st_intersection(circle),
+    aes(
+      fill = PM2_5_2019_levels
+    )
+  ) +
+  scale_fill_manual(values = pm25_palette_brasil) +
+  scale_color_manual("black") +
+  theme_void() +
+  theme(
+    legend.position = "none"
+  )
+
+brasil_map
+```
+
+Colombia
+
+```{r}
+crs2 <- 6384 # https://epsg.io/6384
+
+center <- c(long = -90.5,
+            lat = 14.6)
+center_proj <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2)
+
+dist <-  47000
+circle <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2) %>% 
+  st_buffer(dist = dist) %>% 
+  st_transform(crs = 4326)
+
+ggplot(circle) +
+  geom_sf()
+
+pm25_palette_guatemala <- c("#004529FF", "#14783EFF", "#4BB062FF")
+
+guatemala_map <- ggplot() +
+  geom_sf(
+   data = circle,
+    fill = "white",
+    color = "black"
+  ) +
+  geom_sf(
+    data = DB_complete %>% 
+  filter(SALID1 == 203102) %>% 
+  st_transform(crs = 4326) %>% 
+  st_intersection(circle),
+    aes(
+      fill = PM2_5_2019_levels
+    )
+  ) +
+  scale_fill_manual(values = pm25_palette_guatemala) +
+  scale_color_manual("black") +
+  theme_void() +
+  theme(
+    legend.position = "none"
+  )
+
+guatemala_map
+```
+
+Mexico
+
+```{r}
+crs2 <- 6384 # https://epsg.io/6384
+
+center <- c(long = -99.05,
+            lat = 19.65)
+center_proj <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2)
+
+dist <-  60000
+circle <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2) %>% 
+  st_buffer(dist = dist) %>% 
+  st_transform(crs = 4326)
+
+ggplot(circle) +
+  geom_sf()
+
+pm25_palette_mexico <- c("#14783EFF", "#4BB062FF")
+
+mexico_map <- ggplot() +
+  geom_sf(
+   data = circle,
+    fill = "white",
+    color = "black"
+  ) +
+  geom_sf(
+    data = DB_complete %>% 
+  filter(SALID1 == 204141) %>% 
+  st_transform(crs = 4326) %>% 
+  st_intersection(circle),
+    aes(
+      fill = PM2_5_2019_levels
+    )
+  ) +
+  scale_fill_manual(values = pm25_palette_mexico) +
+  scale_color_manual("black") +
+  theme_void() +
+  theme(
+    legend.position = "none"
+  )
+
+mexico_map
+```
+
+Santiago
+
+```{r}
+crs2 <- 6384 # https://epsg.io/6384
+
+center <- c(long = -70.6,
+            lat = -33.45)
+center_proj <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2)
+
+dist <-  45000
+circle <- tibble(lat = center["lat"], long = center["long"]) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326) %>%
+  st_transform(crs = crs2) %>% 
+  st_buffer(dist = dist) %>% 
+  st_transform(crs = 4326)
+
+ggplot(circle) +
+  geom_sf()
+
+pm25_palette_santiago <- c("#14783EFF", "#4BB062FF")
+
+chile_map <- ggplot() +
+  geom_sf(
+   data = circle,
+    fill = "white",
+    color = "black"
+  ) +
+  geom_sf(
+    data = DB_complete %>% 
+  filter(SALID1 == 103110) %>% 
+  st_transform(crs = 4326) %>% 
+    st_intersection(circle),
+    aes(
+      fill = PM2_5_2019_levels
+    )
+  ) +
+  scale_fill_manual(values = pm25_palette_santiago) +
+  scale_color_manual("black") +
+  theme_void() +
+  theme(
+    legend.position = "none"
+  )
+
+chile_map
+```
+
+Join maps
+
+```{r}
+fig1_facet <- fig1_map + 
+  patchwork::inset_element(fig1_bar, left = -0.33, bottom = 0.02, right = 0.12, top = 0.47) +
+  patchwork::inset_element(argentina_map, left = 0.84, bottom = 0.01, right = 1.22, top = 0.39) +
+  patchwork::inset_element(brasil_map, left = 0.85, bottom = 0.56, right = 1.23, top = 0.94) +
+  patchwork::inset_element(guatemala_map, left = 0.05, bottom = 0.36, right = 0.43, top = 0.74) +
+  patchwork::inset_element(mexico_map, left = -0.30, bottom = 0.55, right = 0.08, top = 0.93) +
+  patchwork::inset_element(chile_map, left = 0.13, bottom = -0.01, right = 0.51, top = 0.37)
+
+ggsave("output/figs/fig1_facet.pdf", plot = fig1_facet, width = 11, height = 7, bg = "white")
+```
+
+## Table 1: Descriptive
+
+### Neighborhood level
+
+```{r}
+DB_complete_nogeom %>% 
+  tbl_summary(
+    include = c(new_dens_thousand, CNSST1517L3, CNSMINPR_L3, CNSUNEMPL3, CNSLABPARTL3, BECADINTDENSL3, BECNBHDCENTL3, BECGSPCTL3, BECMEDNDVINW2018L3),
+    by = c("country"),
+    digits = everything() ~ 2,
+    label = list(
+      new_dens_thousand = "Population density (thousands)",
+      CNSST1517L3 = "15 to 17 yo school attending (%)",
+      CNSMINPR_L3 = "Primary school attendance (%)",
+      CNSUNEMPL3 = "Unemployment (%)",
+      CNSLABPARTL3 = "Labor force (%)",
+      BECADINTDENSL3 = "Intersection density",
+      BECGSPCTL3 = "Percentage of green space",
+      BECMEDNDVINW2018L3 = "Greenness (NDVI)",
+      BECNBHDCENTL3 = "Distance from city centre (km)"
+    ),
+    missing = "no",
+    missing_text = "Missing values"
+  ) %>% 
+  add_overall()
+```
+
+### City level
+
+```{r}
+DB_complete_nogeom %>% 
+  group_by(SALID1) %>% 
+  summarise(
+    new_dens_thousand_city = (sum(new_dens_thousand*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    CNSST1517L3_city = (sum(CNSST1517L3*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    CNSMINPR_L3_city = (sum(CNSMINPR_L3*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    CNSUNEMPL3_city = (sum(CNSUNEMPL3*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    CNSLABPARTL3_city = (sum(CNSLABPARTL3*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    CNSSE3_L1AD_city = (sum(CNSSE3_L1AD*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    BECADINTDENSL3_city = (sum(BECADINTDENSL3*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    BECNBHDCENTL3_city = (sum(BECNBHDCENTL3*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    BECGSPCTL3_city = (sum(BECGSPCTL3*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    BECMEDNDVINW2018L3_city = (sum(BECMEDNDVINW2018L3*CNSPOPL3, na.rm = T))/sum(CNSPOPL3, na.rm = T),
+    GDP = mean(SECGDPGPPC)/1000,
+    POP = mean(BECTPOP2020L1AD)/1000
+  ) %>% 
+  inner_join(
+    DB_complete_nogeom %>% 
+      select(country, SALID1) %>% 
+      distinct(.keep_all = T),
+    by = c("SALID1")
+  ) %>% 
+  select(
+    new_dens_thousand_city, CNSST1517L3_city, CNSMINPR_L3_city, CNSUNEMPL3_city, CNSLABPARTL3_city, CNSSE3_L1AD_city, BECADINTDENSL3_city, BECNBHDCENTL3_city, BECGSPCTL3_city, BECMEDNDVINW2018L3_city, GDP, POP, country
+  ) %>% 
+  tbl_summary(
+    include = c(POP, new_dens_thousand_city, CNSST1517L3_city, CNSMINPR_L3_city, CNSUNEMPL3_city, CNSLABPARTL3_city, CNSSE3_L1AD_city, BECADINTDENSL3_city, BECNBHDCENTL3_city, BECGSPCTL3_city, BECMEDNDVINW2018L3_city, GDP),
+    by = c("country"),
+    digits = everything() ~ 2,
+    label = list(
+      new_dens_thousand_city = "Population density (thousands)",
+      CNSST1517L3_city = "15 to 17 yo school attending (%)",
+      CNSMINPR_L3_city = "Primary school attendance (%)",
+      CNSUNEMPL3_city = "Unemployment (%)",
+      CNSLABPARTL3_city = "Labor force (%)",
+      BECADINTDENSL3_city = "Intersection density",
+      BECGSPCTL3_city = "Percentage of green space",
+      BECMEDNDVINW2018L3_city = "Greenness (NDVI)",
+      BECNBHDCENTL3_city = "Distance from city centre (km)",
+      GDP = "GDP (thousands)",
+      POP = "Population (thousands)"
+    ),
+    missing = "no",
+    missing_text = "Missing values"
+  ) %>% 
+  add_overall()
+```
+
+## Figure 2
+
+### Variant 1
+
+```{r}
+DB_complete_nogeom %>% 
+  drop_na(APSPM25MEAN2019L3) %>% 
+  ggplot() +
+  geom_hline(yintercept = 5, linetype = 2, color = "#e12729", size = 0.6) +
+  geom_hline(yintercept = 10, linetype = 2, color = "#0c8fc7", size = 0.6) +
+  geom_jitter(
+    aes(
+      x = country, 
+      y = APSPM25MEAN2019L3, 
+      color = PM2_5_2019_levels
+    ),
+    width = 0.21,
+    na.rm = T,
+    size = 0.6
+  ) + 
+  geom_boxplot(
+    aes(
+      x = country,
+      y = APSPM25MEAN2019L3
+    ), 
+    outlier.shape = NA, 
+    fill = NA,
+    linewidth = 0.7
+  ) +
+  scale_color_manual(values = pm25_palette) +
+  theme_clean() +
+  labs(
+    color = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")")),
+    x = "Country",
+    y = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")"))
+  ) +
+  theme(legend.position = "right",
+        legend.direction = "vertical",
+        legend.box.margin = margin(-1,-1,-1,-1),
+        legend.background = element_rect(fill = NA,colour = NA),
+        legend.text = element_text(size = 11, colour = "black"),
+        axis.title.y = element_text(size = 13),
+        axis.title.x = element_text(size = 13),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 11)) +
+  annotate(geom="text", x=4.1, y=2.5, 
+           label=expression(paste("2021 WHO guidelines ",PM[2.5]," ","(5",mu,g/m^{3},")")),
+           color="#e12729", size = 3.15) +
+  geom_curve(
+    aes(x = 2.5, y = 5, xend = 2.6, yend = 2.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#e12729"
+  ) +
+  annotate(geom="text", x=4.1, y=6.5, 
+           label=expression(paste("pre-2021 WHO guidelines ",PM[2.5]," ","(10",mu,g/m^{3},")")),
+           color="#0c8fc7", size = 3.2) +
+  geom_curve(
+    aes(x = 2.3, y = 10, xend = 2.4, yend = 6.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#0c8fc7"
+  )
+
+ggsave("output/figs/fig2.png", plot = last_plot(), width = 7.5, height = 5, dpi = 700, bg = "white")
+```
+
+### Variant 2
+
+```{r}
+pm25_palette_2 <- c( "#004529FF", "#14783EFF", "#4BB062FF", "#A2D889FF", "#E4F4ABFF","#f9db8c", "#f8cc1b") 
+
+DB_complete_nogeom %>% 
+  drop_na(APSPM25MEAN2019L3) %>% 
+  ggplot() +
+  geom_violin(
+    aes(
+      x = country, 
+      y = APSPM25MEAN2019L3, 
+      fill = country,
+      color = country
+    ),
+    width = 1.25,
+    na.rm = T,
+    trim = T
+  ) + 
+  geom_boxplot(
+    aes(
+      x = country,
+      y = APSPM25MEAN2019L3
+    ), 
+    outlier.shape = NA, 
+    fill = "white",
+    color = "black",
+    width = 0.1,
+    linewidth = 0.65
+  ) +
+  scale_fill_manual(values = pm25_palette_2) +
+  scale_color_manual(values = pm25_palette_2) +
+  theme_clean() +
+  labs(
+    color = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")")),
+    x = "Country",
+    y = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")"))
+  ) +
+  theme(legend.position = "none",
+        axis.title.y = element_text(size = 13),
+        axis.title.x = element_text(size = 13),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 11)) +
+  geom_hline(yintercept = 5, linetype = 2, color = "#e12729", size = 0.6) +
+  geom_hline(yintercept = 10, linetype = 2, color = "#0c8fc7", size = 0.6) +
+  annotate(geom="text", x=4.1, y=2.5, 
+           label=expression(paste("2021 WHO guidelines ",PM[2.5]," ","(5",mu,g/m^{3},")")),
+           color="#e12729", size = 3.15) +
+  geom_curve(
+    aes(x = 2.9, y = 5, xend = 3, yend = 2.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#e12729"
+  ) +
+  annotate(geom="text", x=4.1, y=6.5, 
+           label=expression(paste("pre-2021 WHO guidelines ",PM[2.5]," ","(10",mu,g/m^{3},")")),
+           color="#0c8fc7", size = 3.2) +
+  geom_curve(
+    aes(x = 2.7, y = 10, xend = 2.8, yend = 6.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#0c8fc7"
+  )
+
+ggsave("output/figs/fig2_violin_no_tail.png", plot = last_plot(), width = 8.5, height = 5, dpi = 700, bg = "white")
+
+DB_complete_nogeom %>% 
+  drop_na(APSPM25MEAN2019L3) %>% 
+  ggplot() +
+  geom_violin(
+    aes(
+      x = country, 
+      y = APSPM25MEAN2019L3, 
+      fill = country,
+      color = country
+    ),
+    width = 1.25,
+    na.rm = T,
+    trim = F
+  ) + 
+  geom_boxplot(
+    aes(
+      x = country,
+      y = APSPM25MEAN2019L3
+    ), 
+    outlier.shape = NA, 
+    fill = "white",
+    color = "black",
+    width = 0.1,
+    linewidth = 0.65
+  ) +
+  scale_fill_manual(values = pm25_palette_2) +
+  scale_color_manual(values = pm25_palette_2) +
+  theme_clean() +
+  labs(
+    color = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")")),
+    x = "Country",
+    y = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")"))
+  ) +
+  theme(legend.position = "none",
+        axis.title.y = element_text(size = 13),
+        axis.title.x = element_text(size = 13),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 11)) +
+  geom_hline(yintercept = 5, linetype = 2, color = "#e12729", size = 0.6) +
+  geom_hline(yintercept = 10, linetype = 2, color = "#0c8fc7", size = 0.6) +
+  annotate(geom="text", x=4.1, y=2.5, 
+           label=expression(paste("2021 WHO guidelines ",PM[2.5]," ","(5",mu,g/m^{3},")")),
+           color="#e12729", size = 3.15) +
+  geom_curve(
+    aes(x = 2.9, y = 5, xend = 3, yend = 2.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#e12729"
+  ) +
+  annotate(geom="text", x=4.1, y=6.5, 
+           label=expression(paste("pre-2021 WHO guidelines ",PM[2.5]," ","(10",mu,g/m^{3},")")),
+           color="#0c8fc7", size = 3.2) +
+  geom_curve(
+    aes(x = 2.7, y = 10, xend = 2.8, yend = 6.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#0c8fc7"
+  )
+
+ggsave("output/figs/fig2_violin_tail.png", plot = last_plot(), width = 8.5, height = 6, dpi = 700, bg = "white")
+```
+
+### Variant 3 - 2019
+
+```{r}
+fig_3_df <- DB_complete_nogeom %>% 
+  drop_na(APSPM25MEAN2019L3)
+
+fig_3_df_box <- DB_complete_nogeom %>% 
+  drop_na(APSPM25MEAN2019L3) %>% 
+  mutate(
+    x = case_when(
+      country == "Argentina" ~ 1,
+      country == "Brazil" ~ 2,
+      country == "Central America*" ~ 3,
+      country == "Chile" ~ 4,
+      country == "Colombia" ~ 5,
+      country == "Mexico" ~ 6
+    )
+  )
+
+p <- ggplot(fig_3_df,aes(x=country,y=APSPM25MEAN2019L3,fill=APSPM25MEAN2019L3))+
+  geom_violin(trim = T)
+
+mywidth <- .643 # bit of trial and error
+# This is all you need for the fill: 
+vl_fill <- data.frame(ggplot_build(p)$data) %>%
+  mutate(xnew = x- mywidth*violinwidth, xend = x+ mywidth*violinwidth) 
+
+# Bit convoluted for the outline, need to be rearranged: the order matters
+vl_poly <- 
+  vl_fill %>% 
+  select(xnew, xend, y, group) %>%
+  pivot_longer(-c(y, group), names_to = "oldx", values_to = "x") %>% 
+  arrange(y) %>%
+  split(., .$oldx) %>%
+  map(., function(x) {
+    if(all(x$oldx == "xnew")) x <- arrange(x, desc(y))
+    x
+    }) %>%
+  bind_rows() %>% 
+  mutate(
+    country = case_when(
+      group == 1 ~ "Argentina",
+      group == 2 ~ "Brazil",
+      group == 3 ~ paste("Central\nAmerica*"),
+      group == 4 ~ "Chile",
+      group == 5 ~ "Colombia",
+      group == 6 ~ "Mexico"
+    )
+  )
+
+ggplot() +
+  #geom_polygon(data = vl_poly, aes(x, y, group = country, color = y), size = 0.7, fill = NA) +
+  geom_segment(data = vl_fill, aes(x = xnew, xend = xend, y = y, yend = y,
+                                   color = y)) +
+  scale_x_continuous(limits = c(0.44,6.5),
+                     breaks = c(1, 2, 3, 4, 5, 6), 
+                     labels = c(
+                       "Argentina",
+                       "Brazil",
+                       paste("Central\nAmerica*"),
+                       "Chile",
+                       "Colombia",
+                       "Mexico"
+                     )) +
+  geom_boxplot(data = fig_3_df_box,
+    aes(
+      x = x,
+      y = APSPM25MEAN2019L3,
+      group = country
+    ), 
+    outlier.shape = NA, 
+    fill = "white",
+    color = "black",
+    width = 0.085,
+    size = 0.72
+  ) +
+  scale_color_gradientn(colours = c("#E4F4ABFF", "#A2D889FF", "#4BB062FF", "#14783EFF", "#004529FF")) +
+  theme_clean() +
+  labs(
+    x = "Country",
+    y = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")"," ", "[2019]"))
+  ) +
+  theme(legend.position = "none",
+        axis.title.y = element_text(size = 13),
+        axis.title.x = element_text(size = 13),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 11)) +
+  geom_hline(yintercept = 5, linetype = 2, color = "#e12729", size = 0.6) +
+  geom_hline(yintercept = 10, linetype = 2, color = "#0c8fc7", size = 0.6) +
+  annotate(geom="text", x=4.1, y=2.5, 
+           label=expression(paste("2021 WHO guidelines ",PM[2.5]," ","(5",mu,g/m^{3},")")),
+           color="#e12729", size = 3.15) +
+  geom_curve(
+    aes(x = 2.9, y = 5, xend = 3, yend = 2.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#e12729"
+  ) +
+  annotate(geom="text", x=4.1, y=6.5, 
+           label=expression(paste("pre-2021 WHO guidelines ",PM[2.5]," ","(10",mu,g/m^{3},")")),
+           color="#0c8fc7", size = 3.2) +
+  geom_curve(
+    aes(x = 2.7, y = 10, xend = 2.8, yend = 6.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#0c8fc7"
+  )
+
+ggsave("output/figs/fig2_2019_violin_gradient.png", plot = last_plot(), width = 8.8, height = 5.2, dpi = 700, bg = "white")
+```
+
+### Variant 3 - Mean Census Year ± 1 year
+
+```{r}
+fig_3_df <- DB_complete_nogeom %>% 
+  drop_na(PM_census)
+
+fig_3_df_box <- DB_complete_nogeom %>% 
+  drop_na(PM_census) %>% 
+  mutate(
+    x = case_when(
+      country == "Argentina" ~ 1,
+      country == "Brazil" ~ 2,
+      country == "Central America*" ~ 3,
+      country == "Chile" ~ 4,
+      country == "Colombia" ~ 5,
+      country == "Mexico" ~ 6
+    )
+  )
+
+p <- ggplot(fig_3_df,aes(x=country,y=PM_census,fill=PM_census))+
+  geom_violin(trim = T)
+
+mywidth <- .675 # bit of trial and error
+# This is all you need for the fill: 
+vl_fill <- data.frame(ggplot_build(p)$data) %>%
+  mutate(xnew = x- mywidth*violinwidth, xend = x+ mywidth*violinwidth) 
+
+# Bit convoluted for the outline, need to be rearranged: the order matters
+vl_poly <- 
+  vl_fill %>% 
+  select(xnew, xend, y, group) %>%
+  pivot_longer(-c(y, group), names_to = "oldx", values_to = "x") %>% 
+  arrange(y) %>%
+  split(., .$oldx) %>%
+  map(., function(x) {
+    if(all(x$oldx == "xnew")) x <- arrange(x, desc(y))
+    x
+    }) %>%
+  bind_rows() %>% 
+  mutate(
+    country = case_when(
+      group == 1 ~ "Argentina",
+      group == 2 ~ "Brazil",
+      group == 3 ~ paste("Central\nAmerica*"),
+      group == 4 ~ "Chile",
+      group == 5 ~ "Colombia",
+      group == 6 ~ "Mexico"
+    )
+  )
+
+ggplot() +
+  #geom_polygon(data = vl_poly, aes(x, y, group = country, color = y), size = 0.7, fill = NA) +
+  geom_segment(data = vl_fill, aes(x = xnew, xend = xend, y = y, yend = y,
+                                   color = y)) +
+  scale_x_continuous(limits = c(0.44,6.5),
+                     breaks = c(1, 2, 3, 4, 5, 6), 
+                     labels = c(
+                       "Argentina",
+                       "Brazil",
+                       paste("Central\nAmerica*"),
+                       "Chile",
+                       "Colombia",
+                       "Mexico"
+                     )) +
+  geom_boxplot(data = fig_3_df_box,
+    aes(
+      x = x,
+      y = PM_census,
+      group = country
+    ), 
+    outlier.shape = NA, 
+    fill = "white",
+    color = "black",
+    width = 0.085,
+    size = 0.72
+  ) +
+  scale_color_gradientn(colours = c("#E4F4ABFF", "#A2D889FF", "#4BB062FF", "#14783EFF", "#004529FF")) +
+  theme_clean() +
+  labs(
+    x = "Country",
+    y = expression(paste(PM[2.5]," ","(",mu,g/m^{3},")"," ", "[Mean Census year ± 1 year]"))
+  ) +
+  theme(legend.position = "none",
+        axis.title.y = element_text(size = 13),
+        axis.title.x = element_text(size = 13),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 11)) +
+  geom_hline(yintercept = 5, linetype = 2, color = "#e12729", size = 0.6) +
+  geom_hline(yintercept = 10, linetype = 2, color = "#0c8fc7", size = 0.6) +
+  annotate(geom="text", x=4, y=2.5, 
+           label=expression(paste("2021 WHO guidelines ",PM[2.5]," ","(5",mu,g/m^{3},")")),
+           color="#e12729", size = 3.65) +
+  geom_curve(
+    aes(x = 2.85, y = 5, xend = 2.95, yend = 2.5),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#e12729"
+  ) +
+  annotate(geom="text", x=4, y=6.8, 
+           label=expression(paste("pre-2021 WHO guidelines ",PM[2.5]," ","(10",mu,g/m^{3},")")),
+           color="#0c8fc7", size = 3.7) +
+  geom_curve(
+    aes(x = 2.7, y = 10, xend = 2.8, yend = 6.8),
+    data = NULL,
+    arrow = arrow(length = unit(0.01, "npc")),
+    color = "#0c8fc7"
+  )
+
+ggsave("output/figs/fig2_CNSYEAR_violin_gradient.png", plot = last_plot(), width = 8.8, height = 5.2, dpi = 700, bg = "white")
+```
+
+## Table 2: PM~2.5~
+
+```{r}
+DB_complete_nogeom %>% 
+  filter(!is.na(PM_census)) %>% 
+  select(PM_census, CNSPOPL3, country) %>% 
+  mutate(
+    WHO_2021 = case_when(
+      PM_census <= 5 ~ 0,
+      PM_census >5 ~ 1
+    ),
+    WHO_pre_2021 = case_when(
+      PM_census <= 10 ~ 0,
+      PM_census >10 ~ 1
+    ),
+    pop_expWHO_2021 = CNSPOPL3*WHO_2021,
+    pop_expWHO_pre_2021 = CNSPOPL3*WHO_pre_2021
+  ) %>% 
+  group_by(country) %>% 
+  summarise(
+    pop = sum(CNSPOPL3, na.rm = T),
+    pop_exp_2021 = sum(pop_expWHO_2021, na.rm = T),
+    pop_exp_pre_2021 = sum(pop_expWHO_pre_2021, na.rm = T),
+    pm_min = min(PM_census, na.rm = T),
+    pm_mean = mean(PM_census, na.rm = T),
+    pm_max = max(PM_census, na.rm = T),
+    pm_median = median(PM_census, na.rm = T),
+    pm_05th_percentile = quantile(PM_census, probs = 0.05, na.rm = T),
+    pm_95th_percentile = quantile(PM_census, probs = 0.95, na.rm = T)
+  ) %>% 
+  mutate(
+    `Study population (millions)` = pop/1000000,
+    `Study population above PM2.5 2021 guidelines (millions)` = pop_exp_2021/1000000,
+    `Percentage of study population above PM2.5 2021 guidelines` = (100/pop)*pop_exp_2021,
+    `Study population above PM2.5 pre-2021 guidelines (millions)` = pop_exp_pre_2021/1000000,
+    `Percentage of study population above PM2.5 pre-2021 guidelines` = (100/pop)*pop_exp_pre_2021,
+    `Mean neighbourhood PM2.5` = pm_mean,
+    `5th percentile neighbourhood PM2.5` = pm_05th_percentile,
+    `Median neighbourhood PM2.5` = pm_median,
+    `95th percentile neighbourhood PM2.5` = pm_95th_percentile
+  ) %>% 
+  select(
+    country,
+    `Study population (millions)`,
+    `Study population above PM2.5 2021 guidelines (millions)`,
+    `Percentage of study population above PM2.5 2021 guidelines`,
+    `Study population above PM2.5 pre-2021 guidelines (millions)`,
+    `Percentage of study population above PM2.5 pre-2021 guidelines`,
+    `Mean neighbourhood PM2.5`,
+    `5th percentile neighbourhood PM2.5`,
+    `Median neighbourhood PM2.5`,
+    `95th percentile neighbourhood PM2.5`
+  ) %>% 
+  tableHTML::tableHTML()
+```
+
+## Fig S1: Correlation plot
+
+```{r}
+library(corrplot) 
+library(RColorBrewer) 
+
+cor_data <- DB_complete_nogeom_model %>% 
+  select(new_dens_thousand, CNSMINPR_L3, BECADINTDENSL3, BECNBHDCENTL3, BECMEDNDVINW2018L3, SECGDPGPPC, BECTPOP2020L1AD)
+
+M<-cor(cor_data, use = "na.or.complete") 
+head(round(M,2)) 
+  
+# customize the correlogram 
+library(corrplot) 
+col <- colorRampPalette(c("#BB4444", "#EE9988",  
+                          "#FFFFFF", "#77AADD", 
+                          "#4477AA")) 
+
+colnames(M) <- c(
+  "Population density",
+  "Education",
+  "Intersection density",
+  "Distance from city center",
+  "Greenness (NDVI)",
+  "GDP",
+  "Population"
+)
+rownames(M) <- c(
+  "Population density",
+  "Education",
+  "Intersection density",
+  "Distance from city center",
+  "Greenness (NDVI)",
+  "GDP",
+  "Population"
+)
+  
+plot_s1 <- corrplot(M, method = "color", col = col(200),   
+         type = "upper", order = "hclust",  
+         addCoef.col = "black", # Add coefficient of correlation 
+         tl.col="black", tl.srt = 45, # Text label color and rotation 
+           
+         # Combine with significance 
+         sig.level = 0.01, insig = "blank",  
+           
+         # hide correlation coefficient 
+         # on the principal diagonal 
+         diag = FALSE
+)
+plot_s1
+
+ggsave("output/figs/fig_s1_correlation.png", plot = last_plot(), width = 8.2, height = 6, dpi = 700, bg = "white")
+```
+
+## Full-adjusted Multilevel Model
+
+```{r}
+DB_complete_nogeom_model <- DB_complete_nogeom %>% 
+  mutate(
+    new_dens_thousand = scale(new_dens_thousand),
+    CNSST1517L3 = scale(CNSST1517L3),
+    CNSMINPR_L3 = scale(CNSMINPR_L3),
+    CNSUNEMPL3 = scale(CNSUNEMPL3),
+    CNSLABPARTL3 = scale(CNSLABPARTL3),
+    CNSSE3_L1AD = scale(CNSSE3_L1AD),
+    BECADINTDENSL3 = scale(BECADINTDENSL3),
+    BECNBHDCENTL3 = scale(BECNBHDCENTL3),
+    BECGSPCTL3 = scale(BECGSPCTL3),
+    BECMEDNDVINW2018L3 = scale(BECMEDNDVINW2018L3),
+    SECGDPGPPC = scale(SECGDPGPPC),
+    BECCITYAGEL1AD = scale(city_age_num),
+    BECTPOP2020L1AD = scale(BECTPOP2020L1AD)
+  )
+
+model_2019 <- lmer(APSPM25MEAN2019L3 ~ 1 + new_dens_thousand + CNSMINPR_L3 + BECADINTDENSL3 + BECNBHDCENTL3 + BECMEDNDVINW2018L3 + SECGDPGPPC + BECTPOP2020L1AD + found_year + (1 | country/SALID1), data = DB_complete_nogeom_model)
+
+tab_model(model_2019,
+          transform = "exp",
+         string.est = "Estimate",
+         string.ci = "Conf. Int.",
+         string.p = "p-value",
+         string.pred = "Coefficients",
+         string.intercept = "Intercept",
+         dv.labels = "PM2.5",
+         pred.labels = c(
+           new_dens_thousand = "Population density",
+           CNSMINPR_L3 = "Adults who completed primary school",
+           CNSLABPARTL3 = "Labor force",
+           BECADINTDENSL3 = "Intersection density",
+           BECGSPCTL3 = "Percentage of green space",
+           BECMEDNDVINW2018L3 = "Greenness (NDVI)",
+           BECNBHDCENTL3 = "Distance from city centre (km)",
+           SECGDPGPPC = "GDP",
+           found_year = "Year of Foundation"
+         )
+         )
+
+tab_model(model_2019,
+         string.est = "Estimate",
+         string.ci = "Conf. Int.",
+         string.p = "p-value",
+         string.pred = "Coefficients",
+         string.intercept = "Intercept",
+         dv.labels = "PM2.5",
+         pred.labels = c(
+           new_dens_thousand = "Population density",
+           CNSMINPR_L3 = "Adults who completed primary school",
+           CNSLABPARTL3 = "Labor force",
+           BECADINTDENSL3 = "Intersection density",
+           BECGSPCTL3 = "Percentage of green space",
+           BECMEDNDVINW2018L3 = "Greenness (NDVI)",
+           BECNBHDCENTL3 = "Distance from city centre (km)",
+           SECGDPGPPC = "GDP",
+           found_year = "Year of Foundation"
+         )
+         )
+
+model_2019_num <- lmer(APSPM25MEAN2019L3 ~ 1 + new_dens_thousand + CNSMINPR_L3 + BECADINTDENSL3 + BECNBHDCENTL3 + BECMEDNDVINW2018L3 + SECGDPGPPC + BECCITYAGEL1AD + BECTPOP2020L1AD + (1 | country/SALID1), data = DB_complete_nogeom_model)
+
+tab_model(model_2019_num,
+         string.est = "Estimate",
+         string.ci = "Conf. Int.",
+         string.p = "p-value",
+         string.pred = "Coefficients",
+         string.intercept = "Intercept",
+         dv.labels = "PM2.5",
+         pred.labels = c(
+           new_dens_thousand = "Population density",
+           CNSMINPR_L3 = "Adults who completed primary school",
+           CNSLABPARTL3 = "Labor force",
+           BECADINTDENSL3 = "Intersection density",
+           BECGSPCTL3 = "Percentage of green space",
+           BECMEDNDVINW2018L3 = "Greenness (NDVI)",
+           BECNBHDCENTL3 = "Distance from city centre (km)",
+           SECGDPGPPC = "GDP (City level)",
+           BECCITYAGEL1AD = "Year of Foundation",
+           BECTPOP2020L1AD = "Population (City Level)"
+         )
+         )
+
+model_census <- lmer(PM_census ~ 1 + new_dens_thousand + CNSMINPR_L3 + BECADINTDENSL3 + BECNBHDCENTL3 + BECMEDNDVINW2018L3 + SECGDPGPPC + city_age_num + BECTPOP2020L1AD + (1 | country/SALID1), data = DB_complete_nogeom_model)
+
+tab_model(model_census,
+         string.est = "Estimate",
+         string.ci = "Conf. Int.",
+         string.p = "p-value",
+         string.pred = "Coefficients",
+         string.intercept = "Intercept",
+         dv.labels = "PM2.5",
+         pred.labels = c(
+           new_dens_thousand = "Population density",
+           CNSMINPR_L3 = "Adults who completed primary school",
+           CNSLABPARTL3 = "Labor force",
+           BECADINTDENSL3 = "Intersection density",
+           BECGSPCTL3 = "Percentage of green space",
+           BECMEDNDVINW2018L3 = "Greenness (NDVI)",
+           BECNBHDCENTL3 = "Distance from city centre (km)",
+           SECGDPGPPC = "GDP (City level)",
+           city_age_num = "City age (Until census)",
+           BECTPOP2020L1AD = "Population (City Level)"
+         )
+         )
+```
+
+## Cathegoric Models
+
+t_model(model)
+
+\# Combine plot and table
+
+grid.arrange(plot, table_grob, ncol = 1, heights = c(3, 1))
+
+```{r}
+DB_complete_nogeom_model <- DB_complete_nogeom %>%  
+  mutate(
+    tert_new_dens_thousand = ntile(new_dens_thousand, 3),
+    tert_CNSST1517L3 = ntile(CNSST1517L3, 3),
+    tert_CNSMINPR_L3 = ntile(CNSMINPR_L3, 3),
+    tert_CNSUNEMPL3 = ntile(CNSUNEMPL3, 3),
+    tert_CNSLABPARTL3 = ntile(CNSLABPARTL3, 3),
+    tert_CNSSE3_L1AD = ntile(CNSSE3_L1AD, 3),
+    tert_BECADINTDENSL3 = ntile(BECADINTDENSL3, 3),
+    tert_BECNBHDCENTL3 = ntile(BECNBHDCENTL3, 3),
+    tert_BECGSPCTL3 = ntile(BECGSPCTL3, 3),
+    tert_BECMEDNDVINW2018L3 = ntile(BECMEDNDVINW2018L3, 3),
+    tert_SECGDPGPPC = ntile(SECGDPGPPC, 3),
+    tert_age_city = ntile(city_age_num, 3),
+    tert_BECTPOP2020L1AD = ntile(BECTPOP2020L1AD, 3)
+  ) %>% 
+  mutate(
+    tert_new_dens_thousand = ifelse(tert_new_dens_thousand == 1, "1st Tertile", ifelse(tert_new_dens_thousand == 2, "2nd Tertile", "3rd Tertile")),
+    tert_CNSST1517L3 = ifelse(tert_CNSST1517L3 == 1, "1st Tertile", ifelse(tert_CNSST1517L3 == 2, "2nd Tertile", "3rd Tertile")),
+    tert_CNSMINPR_L3 = ifelse(tert_CNSMINPR_L3 == 1, "1st Tertile", ifelse(tert_CNSMINPR_L3 == 2, "2nd Tertile", "3rd Tertile")),
+    tert_CNSUNEMPL3 = ifelse(tert_CNSUNEMPL3 == 1, "1st Tertile", ifelse(tert_CNSUNEMPL3 == 2, "2nd Tertile", "3rd Tertile")),
+    tert_CNSLABPARTL3 = ifelse(tert_CNSLABPARTL3 == 1, "1st Tertile", ifelse(tert_CNSLABPARTL3 == 2, "2nd Tertile", "3rd Tertile")),
+    tert_CNSSE3_L1AD = ifelse(tert_CNSSE3_L1AD == 1, "1st Tertile", ifelse(tert_CNSSE3_L1AD == 2, "2nd Tertile", "3rd Tertile")),
+    tert_BECADINTDENSL3 = ifelse(tert_BECADINTDENSL3 == 1, "1st Tertile", ifelse(tert_BECADINTDENSL3 == 2, "2nd Tertile", "3rd Tertile")),
+    tert_BECNBHDCENTL3 = ifelse(tert_BECNBHDCENTL3 == 1, "1st Tertile", ifelse(tert_BECNBHDCENTL3 == 2, "2nd Tertile", "3rd Tertile")),
+    tert_BECGSPCTL3 = ifelse(tert_BECGSPCTL3 == 1, "1st Tertile", ifelse(tert_BECGSPCTL3 == 2, "2nd Tertile", "3rd Tertile")),
+    tert_BECMEDNDVINW2018L3 = ifelse(tert_BECMEDNDVINW2018L3 == 1, "1st Tertile", ifelse(tert_BECMEDNDVINW2018L3 == 2, "2nd Tertile", "3rd Tertile")),
+    tert_SECGDPGPPC = ifelse(tert_SECGDPGPPC == 1, "1st Tertile", ifelse(tert_SECGDPGPPC == 2, "2nd Tertile", "3rd Tertile")),
+    tert_age_city = ifelse(tert_age_city == 1, "1st Tertile", ifelse(tert_age_city == 2, "2nd Tertile", "3rd Tertile")),
+    tert_BECTPOP2020L1AD = ifelse(tert_BECTPOP2020L1AD == 1, "1st Tertile", ifelse(tert_BECTPOP2020L1AD == 2, "2nd Tertile", "3rd Tertile"))
+  )
+
+model_census_cat <- lmer(PM_census ~ 1 + tert_new_dens_thousand + tert_CNSMINPR_L3 + tert_BECADINTDENSL3 + tert_BECNBHDCENTL3 + tert_BECMEDNDVINW2018L3 + tert_SECGDPGPPC + tert_age_city + tert_BECTPOP2020L1AD + (1 | country/SALID1), data = DB_complete_nogeom_model)
+
+table <- tab_model(model_census_cat,
+         string.est = "Estimate",
+         string.ci = "Conf. Int.",
+         string.p = "p-value",
+         string.pred = "Coefficients",
+         string.intercept = "Intercept",
+         dv.labels = "PM2.5",
+         pred.labels = c(
+           `tert_new_dens_thousand2nd Tertile` = "Population density 2nd Tertile",
+           `tert_CNSMINPR_L32nd Tertile` = "Adults who completed primary school 2nd Tertile",
+           `tert_CNSLABPARTL32nd Tertile` = "Labor force 2nd Tertile",
+           `tert_BECADINTDENSL32nd Tertile` = "Intersection density 2nd Tertile",
+           `tert_BECGSPCTL32nd Tertile` = "Percentage of green space 2nd Tertile",
+           `tert_BECMEDNDVINW2018L32nd Tertile` = "Greenness (NDVI) 2nd Tertile",
+           `tert_BECNBHDCENTL32nd Tertile` = "Distance from city centre (km) 2nd Tertile",
+           `tert_SECGDPGPPC2nd Tertile` = "GDP (City level) 2nd Tertile",
+           `tert_age_city2nd Tertile` = "City age 2nd Tertile",
+           `tert_BECTPOP2020L1AD2nd Tertile` = "Population (City Level) 2nd Tertile",
+           `tert_new_dens_thousand3rd Tertile` = "Population density 3rd Tertile",
+           `tert_CNSMINPR_L33rd Tertile` = "Adults who completed primary school 3rd Tertile",
+           `tert_CNSLABPARTL33rd Tertile` = "Labor force 3rd Tertile",
+           `tert_BECADINTDENSL33rd Tertile` = "Intersection density 3rd Tertile",
+           `tert_BECGSPCTL33rd Tertile` = "Percentage of green space 3rd Tertile",
+           `tert_BECMEDNDVINW2018L33rd Tertile` = "Greenness (NDVI) 3rd Tertile",
+           `tert_BECNBHDCENTL33rd Tertile` = "Distance from city centre (km) 3rd Tertile",
+           `tert_SECGDPGPPC3rd Tertile` = "GDP (City level) 3rd Tertile",
+           `tert_age_city3rd Tertile` = "City age 3rd Tertile",
+           `tert_BECTPOP2020L1AD3rd Tertile` = "Population (City Level) 3rd Tertile"
+         )
+         )
+
+plot <- plot_model(model_census_cat, show.values = TRUE, value.offset = .4,
+           value.size = 3.3,
+           axis.labels = rev(c(
+             "Population density 2nd Tertile",
+             "Population density 3rd Tertile",
+             "Adults who completed primary school 2nd Tertile",
+             "Adults who completed primary school 3rd Tertile",
+             "Intersection density 2nd Tertile",
+             "Intersection density 3rd Tertile",
+             "Greenness (NDVI) 2nd Tertile",
+             "Greenness (NDVI) 3rd Tertile",
+             "Distance from city centre (km) 2nd Tertile",
+             "Distance from city centre (km) 3rd Tertile",
+             "GDP (City level) 2nd Tertile",
+             "GDP (City level) 3rd Tertile",
+             "City age 2nd Tertile",
+             "City age 3rd Tertile",
+             "Population (City Level) 2nd Tertile",
+             "Population (City Level) 3rd Tertile"
+           )),
+           title = "", #axis.lim = c(0.1,10)
+           ) +
+  theme_clean() +
+  geom_hline(yintercept = 0, lty = 2)
+
+ggsave("output/figs/model_general.png", plot = last_plot(), width = 8.2, height = 6, dpi = 700, bg = "white")
+
+model <- c("Population density [2nd Tertile]",
+             "Population density [3rd Tertile]",
+             "Education [2nd Tertile]",
+             "Education [3rd Tertile]",
+             "Intersection density [2nd Tertile]",
+             "Intersection density [3rd Tertile]",
+             "Greenness (NDVI) [2nd Tertile]",
+             "Greenness (NDVI) [3rd Tertile]",
+             "Distance from city center [2nd Tertile]",
+             "Distance from city center [3rd Tertile]",
+             "GDP at City level [2nd Tertile]",
+             "GDP at City level [3rd Tertile]",
+             "City age [2nd Tertile]",
+             "City age [3rd Tertile]",
+             "Population at City Level [2nd Tertile]",
+             "Population at City Level [3rd Tertile]")
+
+p <- summary(model_census_cat)$coefficients
+res <- p[,1] %>% 
+  as.data.frame() %>% 
+  select(".") %>% 
+  filter(. < 18.35)
+
+p_valor <- parameters::p_value(model_census_cat) %>% 
+  as.data.frame() %>%
+  filter(Parameter != "(Intercept)") %>% 
+  select("p")
+
+conf <- confint(model_census_cat, method = "Wald")
+conf_low <- conf[,1] %>% 
+  as.data.frame() %>% 
+  drop_na() %>% 
+  filter(. < 15.8)
+conf_high <- conf[,2] %>% 
+  as.data.frame() %>% 
+  drop_na() %>% 
+  filter(. < 20.8)
+
+res$model <- model
+res$estimate <- Estimate$.
+res$`p.value` <- p_valor$p
+res$`conf.low` <- conf_low$.
+res$`conf.high` <- conf_high$.
+res <- res %>% 
+  mutate(
+    model = factor(
+      model,
+      levels = c("Population density [2nd Tertile]",
+             "Population density [3rd Tertile]",
+             "Education [2nd Tertile]",
+             "Education [3rd Tertile]",
+             "Intersection density [2nd Tertile]",
+             "Intersection density [3rd Tertile]",
+             "Greenness (NDVI) [2nd Tertile]",
+             "Greenness (NDVI) [3rd Tertile]",
+             "Distance from city center [2nd Tertile]",
+             "Distance from city center [3rd Tertile]",
+             "GDP at City level [2nd Tertile]",
+             "GDP at City level [3rd Tertile]",
+             "City age [2nd Tertile]",
+             "City age [3rd Tertile]",
+             "Population at City Level [2nd Tertile]",
+             "Population at City Level [3rd Tertile]")
+    )
+    )
+
+res <- res %>% 
+  select("model","estimate","p.value","conf.low","conf.high")
+
+p_mid <- res |>
+  ggplot(aes(y = fct_rev(model))) +
+  theme_classic() +
+  geom_point(aes(x=estimate), shape=15, size=3) +
+  geom_linerange(aes(xmin=conf.low, xmax=conf.high)) +
+  labs(x=expression(paste(beta," - Coefficient"))) +
+  coord_cartesian(ylim=c(1,17), xlim=c(-2.5, 2.5))+
+  geom_vline(xintercept = 0, linetype="dashed") +
+  annotate("text", x = -1.5, y = 17, label = expression(paste("Decrease ",PM[2.5]))) +
+  annotate("text", x = 1.5, y = 17, label = expression(paste("Increase ",PM[2.5]))) +
+  theme(axis.line.y = element_blank(),
+        axis.ticks.y= element_blank(),
+        axis.text.y= element_blank(),
+        axis.title.y= element_blank())
+# wrangle results into pre-plotting table form
+res_plot <- res |>
+  mutate(across(c(estimate, conf.low, conf.high), ~str_pad(round(.x, 2), width=4, pad="0", side="right")),
+         estimate_lab = paste0(estimate, " (", conf.low, " to ", conf.high,")"),
+         color = rep(c("gray","white"),8)) |>
+  mutate(p.value = case_when(p.value < .01 ~ "<0.01", TRUE ~ str_pad(as.character(round(p.value, 2)),width=4,pad="0",side="right"))) |>
+  bind_rows(data.frame(model = "Characteristics", estimate_lab = "β - Coefficient", conf.low = "", conf.high="",p.value="p-value")) |>
+  mutate(model = fct_rev(factor(model, c("Characteristics","Population density [2nd Tertile]",
+             "Population density [3rd Tertile]",
+             "Education [2nd Tertile]",
+             "Education [3rd Tertile]",
+             "Intersection density [2nd Tertile]",
+             "Intersection density [3rd Tertile]",
+             "Greenness (NDVI) [2nd Tertile]",
+             "Greenness (NDVI) [3rd Tertile]",
+             "Distance from city center [2nd Tertile]",
+             "Distance from city center [3rd Tertile]",
+             "GDP at City level [2nd Tertile]",
+             "GDP at City level [3rd Tertile]",
+             "City age [2nd Tertile]",
+             "City age [3rd Tertile]",
+             "Population at City Level [2nd Tertile]",
+             "Population at City Level [3rd Tertile]"))))
+# left side of plot - hazard ratios
+p_left <- 
+  res_plot  |>
+  ggplot(aes(y = model)) + 
+  geom_text(aes(x=0, label=model), hjust=0, fontface = "bold") +
+  geom_text(aes(x=1, label=estimate_lab), hjust=0, fontface = ifelse(res_plot$estimate_lab == "β - Coefficient (95% CI)", "bold", "plain")) +
+  theme_void() +
+  coord_cartesian(xlim=c(0,1.43))
+# right side of plot - pvalues
+p_right <- 
+  res_plot  |>
+  ggplot() +
+  geom_text(aes(x=0, y=model, label=p.value), hjust=0, fontface = ifelse(res_plot$p.value == "p-value", "bold", "plain")) +
+  theme_void() 
+# layout design (top, left, bottom, right)
+library(patchwork)
+layout <- c(
+  area(t = 0, l = 0, b = 30, r = 5),
+  area(t = 1, l = 6.2, b = 30, r = 13),
+  area(t = 0, l = 13, b = 30, r = 14)
+)
+# final plot arrangement
+p_left + p_mid + p_right + plot_layout(design = layout)
+## save final figure
+
+ggsave("output/figs/model_general_table.png", plot = last_plot(), width = 12.7, height = 7, dpi = 700, bg = "white")
+```
+
+```{r}
+model_census_cat_t1 <- lmer(PM_census ~ 1 + tert_new_dens_thousand + tert_CNSMINPR_L3 + tert_BECADINTDENSL3 + tert_BECNBHDCENTL3 + tert_BECMEDNDVINW2018L3 + tert_SECGDPGPPC + tert_BECTPOP2020L1AD + (1 | country/SALID1), data = DB_complete_nogeom_model %>% filter(tert_age_city == "1st Tertile"))
+
+model_census_cat_t2 <- lmer(PM_census ~ 1 + tert_new_dens_thousand + tert_CNSMINPR_L3 + tert_BECADINTDENSL3 + tert_BECNBHDCENTL3 + tert_BECMEDNDVINW2018L3 + tert_SECGDPGPPC + tert_BECTPOP2020L1AD + (1 | country/SALID1), data = DB_complete_nogeom_model %>% filter(tert_age_city == "2nd Tertile"))
+
+model_census_cat_t3 <- lmer(PM_census ~ 1 + tert_new_dens_thousand + tert_CNSMINPR_L3 + tert_BECADINTDENSL3 + tert_BECNBHDCENTL3 + tert_BECMEDNDVINW2018L3 + tert_SECGDPGPPC + tert_BECTPOP2020L1AD + (1 | country/SALID1), data = DB_complete_nogeom_model %>% filter(tert_age_city == "3rd Tertile"))
+
+plot_model(model_census_cat_t1,
+           show.values = TRUE, 
+           value.offset = .4,
+           value.size = 3.3,
+           axis.labels = rev(c(
+             "Population density 2nd Tertile",
+             "Population density 3rd Tertile",
+             "Adults who completed primary school 2nd Tertile",
+             "Adults who completed primary school 3rd Tertile",
+             "Intersection density 2nd Tertile",
+             "Intersection density 3rd Tertile",
+             "Greenness (NDVI) 2nd Tertile",
+             "Greenness (NDVI) 3rd Tertile",
+             "Distance from city centre (km) 2nd Tertile",
+             "Distance from city centre (km) 3rd Tertile",
+             "GDP (City level) 2nd Tertile",
+             "GDP (City level) 3rd Tertile",
+             "Population (City Level) 2nd Tertile",
+             "Population (City Level) 3rd Tertile"
+           )),
+           transform = "exp",
+           title = ""
+           ) +
+  theme_clean() +
+  geom_hline(yintercept = 1, lty = 2)
+
+ggsave("output/figs/model_general_t1.png", plot = last_plot(), width = 8.2, height = 6, dpi = 700, bg = "white")
+
+plot_model(model_census_cat_t2,
+           show.values = TRUE, 
+           value.offset = .4,
+           value.size = 3.3,
+           axis.labels = rev(c(
+             "Population density 2nd Tertile",
+             "Population density 3rd Tertile",
+             "Adults who completed primary school 2nd Tertile",
+             "Adults who completed primary school 3rd Tertile",
+             "Intersection density 2nd Tertile",
+             "Intersection density 3rd Tertile",
+             "Greenness (NDVI) 2nd Tertile",
+             "Greenness (NDVI) 3rd Tertile",
+             "Distance from city centre (km) 2nd Tertile",
+             "Distance from city centre (km) 3rd Tertile",
+             "GDP (City level) 2nd Tertile",
+             "GDP (City level) 3rd Tertile",
+             "Population (City Level) 2nd Tertile",
+             "Population (City Level) 3rd Tertile"
+           )),
+           transform = "exp",
+           title = ""
+           ) +
+  theme_clean() +
+  geom_hline(yintercept = 1, lty = 2)
+
+ggsave("output/figs/model_general_t2.png", plot = last_plot(), width = 8.2, height = 6, dpi = 700, bg = "white")
+
+plot_model(model_census_cat_t3,
+           show.values = TRUE, 
+           value.offset = .4,
+           value.size = 3.3,
+           axis.labels = rev(c(
+             "Population density 2nd Tertile",
+             "Population density 3rd Tertile",
+             "Adults who completed primary school 2nd Tertile",
+             "Adults who completed primary school 3rd Tertile",
+             "Intersection density 2nd Tertile",
+             "Intersection density 3rd Tertile",
+             "Greenness (NDVI) 2nd Tertile",
+             "Greenness (NDVI) 3rd Tertile",
+             "Distance from city centre (km) 2nd Tertile",
+             "Distance from city centre (km) 3rd Tertile",
+             "GDP (City level) 2nd Tertile",
+             "GDP (City level) 3rd Tertile",
+             "Population (City Level) 2nd Tertile",
+             "Population (City Level) 3rd Tertile"
+           )),
+           transform = "exp",
+           title = ""
+           ) +
+  theme_clean() +
+  geom_hline(yintercept = 1, lty = 2)
+
+ggsave("output/figs/model_general_t3.png", plot = last_plot(), width = 8.2, height = 6, dpi = 700, bg = "white")
+
+
+plot_models(model_census_cat_t1, model_census_cat_t2, model_census_cat_t3,
+           show.values = F, 
+           spacing = .8,
+           dot.size = 2.2,
+           axis.labels = rev(c(
+             "Population density 2nd Tertile",
+             "Population density 3rd Tertile",
+             "Adults who completed primary school 2nd Tertile",
+             "Adults who completed primary school 3rd Tertile",
+             "Intersection density 2nd Tertile",
+             "Intersection density 3rd Tertile",
+             "Greenness (NDVI) 2nd Tertile",
+             "Greenness (NDVI) 3rd Tertile",
+             "Distance from city centre (km) 2nd Tertile",
+             "Distance from city centre (km) 3rd Tertile",
+             "GDP (City level) 2nd Tertile",
+             "GDP (City level) 3rd Tertile",
+             "Population (City Level) 2nd Tertile",
+             "Population (City Level) 3rd Tertile"
+           )),
+           title = "", axis.lim = c(-10,7),
+           colors = c("#0c8fc7", "#72b043", "#e12729"),
+           #axis.lim = c(1e-4,1000),
+           m.labels = c(
+             "City age 1st Tertile", "City age 2nd Tertile","City age 3rd Tertile"
+           ),
+           legend.title = "Models"
+           ) +
+  theme_clean() +
+  geom_hline(yintercept = 1, lty = 2) +
+  theme(legend.position = "bottom")
+
+ggsave("output/figs/model_t1_t3.png", plot = last_plot(), width = 8.3, height = 6.4, dpi = 700, bg = "white")
+```
+
+```{r}
+p1 <- plot_models(model_census_cat_t1, model_census_cat_t2, model_census_cat_t3,
+           show.values = F, 
+           spacing = .8,
+           dot.size = 2.2,
+           rm.terms = c(
+             "tert_SECGDPGPPC2nd Tertile",
+             "tert_SECGDPGPPC3rd Tertile",
+             "tert_BECTPOP2020L1AD2nd Tertile",
+             "tert_BECTPOP2020L1AD3rd Tertile"
+           ),
+           axis.labels = rev(c(
+             "Population density 2nd Tertile",
+             "Population density 3rd Tertile",
+             "Adults who completed primary school 2nd Tertile",
+             "Adults who completed primary school 3rd Tertile",
+             "Intersection density 2nd Tertile",
+             "Intersection density 3rd Tertile",
+             "Greenness (NDVI) 2nd Tertile",
+             "Greenness (NDVI) 3rd Tertile",
+             "Distance from city center 2nd Tertile",
+             "Distance from city center 3rd Tertile"
+           )),
+           title = "", axis.lim = c(-2.5,2.5),
+           colors = c("#0c8fc7", "#72b043", "#e12729"),
+           #axis.lim = c(1e-4,1000),
+           m.labels = c(
+             "City age 1st Tertile", "City age 2nd Tertile","City age 3rd Tertile"
+           ),
+           legend.title = "Models"
+           ) +
+  theme_clean() +
+  geom_hline(yintercept = 0, lty = 2) +
+  theme(legend.position = "none")
+
+
+p2 <- plot_models(model_census_cat_t1, model_census_cat_t2, model_census_cat_t3,
+           show.values = F, 
+           spacing = .8,
+           dot.size = 2.2,
+           rm.terms = c(
+             "tert_new_dens_thousand2nd Tertile",
+             "tert_new_dens_thousand3rd Tertile",
+             "tert_CNSMINPR_L32nd Tertile",
+             "tert_CNSMINPR_L33rd Tertile",
+             "tert_BECADINTDENSL32nd Tertile",
+             "tert_BECADINTDENSL33rd Tertile",
+             "tert_BECNBHDCENTL32nd Tertile",
+             "tert_BECNBHDCENTL33rd Tertile",
+             "tert_BECMEDNDVINW2018L32nd Tertile",
+             "tert_BECMEDNDVINW2018L33rd Tertile"
+           ),
+           axis.labels = rev(c(
+             "GDP 2nd Tertile",
+             "GDP 3rd Tertile",
+             "Population 2nd Tertile",
+             "Population 3rd Tertile"
+           )),
+           title = "", axis.lim = c(-10,10),
+           colors = c("#0c8fc7", "#72b043", "#e12729"),
+           #axis.lim = c(1e-4,1000),
+           m.labels = c(
+             "City age 1st Tertile", "City age 2nd Tertile","City age 3rd Tertile"
+           ),
+           legend.title = "Models"
+           ) +
+  theme_clean() +
+  geom_hline(yintercept = 0, lty = 2) +
+  theme(legend.position = "bottom",
+        legend.key.size = unit(0.6,"cm"))
+
+plot_grid(p1, p2, nrow = 2, ncol = 1, rel_heights = c(1.4,0.8),
+          labels = c("Neighborhood-level variables",
+                     "City-level variables"),
+          label_x = c(0.05,0.1))
+
+ggsave("output/figs/figs2.png", plot = last_plot(), width =7.3, height = 8, dpi = 700, bg = "white")
+```
